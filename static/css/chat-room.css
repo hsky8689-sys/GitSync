@@ -82,9 +82,9 @@
 }
 #message-display {
     display: flex;
-    flex-direction: column; /* Mesajele stau unul sub altul */
-    overflow-y: auto;       /* Aici apare scroll-ul */
-    height: 400px;          /* Obligatoriu o înălțime fixă ca să poată face scroll! */
+    flex-direction: column;
+    overflow-y: auto;
+    height: 400px;
     padding: 10px;
 }
 
@@ -96,7 +96,50 @@
 }
 
 .message.sent {
-    background-color: #007bff; /* Albastru de WhatsApp pentru tine */
+    background-color: #007bff;
     color: white;
-    align-self: flex-end;      /* Îl aruncă în dreapta */
+    align-self: flex-end;
+}
+
+.message-wrapper {
+    display: flex;
+    align-items: flex-end;
+    margin-bottom: 15px;
+    gap: 10px;
+    width: 100%;
+}
+
+.message-wrapper.sent {
+    flex-direction: row-reverse;
+}
+
+.message-wrapper.received {
+    flex-direction: row;
+}
+
+.message-avatar {
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.message-bubble {
+    max-width: 65%;
+    padding: 10px 15px;
+    border-radius: 18px;
+    word-wrap: break-word;
+}
+
+.message-wrapper.sent .message-bubble {
+    background-color: #0084ff;
+    color: white;
+    border-bottom-right-radius: 4px;
+}
+
+.message-wrapper.received .message-bubble {
+    background-color: #e4e6eb;
+    color: black;
+    border-bottom-left-radius: 4px;
 }

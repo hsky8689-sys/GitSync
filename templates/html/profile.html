@@ -3,10 +3,13 @@
 {% block content %}
     <div class="profile-data">
         <div class="cover-photo">
-            <img src="{% static 'css/img/sbcf-default-background.jpg' %}" alt="Cover">
+            <img src="{% if background_picture %}/media/{{ background_picture }}{% else %}{% static 'background_pictures/sbcf-default-background.jpg' %}{% endif %}" alt="Cover">
         </div>
         <div class="avatar-container">
-            <img src="{% static 'css/img/default-avatar.png' %}" alt="Profile">
+            <img src="{% if user_avatar %}/media/{{ user_avatar }}{% else %}{% static 'profile_pictures/default-avatar.png' %}{% endif %}" alt="Profile">
+        </div>
+        <div class="avatar-container">
+            <img src="{% static user_avatar %}" alt="Profile">
         </div>
         <div class="near-avatar">
                 <h1>{{username}}</h1>

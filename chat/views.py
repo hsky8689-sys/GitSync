@@ -1,4 +1,7 @@
 import json
+
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 from django.http import JsonResponse
@@ -135,6 +138,21 @@ def chat_message_api(request):
         try:
             message, real_conv_id = ConversationService.send_message(
                 user_id, conversation_id, content, user_1on1
+            )
+
+            channel_layer = get_channel_layer()
+
+            room_group_name = f'chat_{real_conv_id}'
+
+            async_to_sync(channel_layer.group_send)(
+                room_group_name,
+                {
+                    'type': 'chat_message',
+                    'message': {
+                        'content': message.content,
+                        'sender_id': message.user_id,
+                    }
+                }
             )
 
             return JsonResponse({

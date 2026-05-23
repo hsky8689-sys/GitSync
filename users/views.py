@@ -5,11 +5,13 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.shortcuts import render, redirect, get_object_or_404
+from django.templatetags.static import static
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from projects.models import Project
-from .models import User, UserProfileSection, UserTechnicalSkillSection, UserTechnicalSkill, UserRequest, Friendship
+from .models import User, UserProfileSection, UserTechnicalSkillSection, UserTechnicalSkill, UserRequest, Friendship, \
+    UserProfileData
 from .search import SearchManager, SearchFilterData
 
 
@@ -81,6 +83,8 @@ def acces_profile(request,username):
     sent_to_him = False
     received_from_him = False
     are_friends = False
+    profile_picture = ''
+    background_picture = ''
     try:
         friendship_request = UserRequest.objects.find_request(request.user, user).first()
         friendship = Friendship.objects.find_friendship(request.user,user).first()
@@ -91,10 +95,15 @@ def acces_profile(request,username):
                     sent_to_him = True
                 else:
                     received_from_him = True
+        data = UserProfileData.objects.get(user_id=user.id)
+        profile_picture = data.profile_picture
+        background_picture = data.background_picture
     except Exception as e:
             pass
     context = {
         "username":user.username,
+        "user_avatar":profile_picture,
+        "background_picture":background_picture,
         "email":user.email,
         "id":user.id,
         "user":user,

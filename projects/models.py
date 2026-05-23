@@ -478,3 +478,17 @@ class ProjectSkillRequirement(models.Model):
 
     class Meta:
         db_table = 'project_skill_requirements'
+
+
+class ResourceAccess(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE)
+    resource_path = models.CharField(max_length=255)
+
+    allowed_users = models.ManyToManyField(User, related_name='accessible_resources')
+
+    locked_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                  related_name='locked_resources')
+    locked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('project', 'resource_path')

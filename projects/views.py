@@ -10,11 +10,13 @@ from django.shortcuts import get_object_or_404
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django_ratelimit.decorators import ratelimit
 
 import users.views
 from devnetwork import settings
 from projects.models import Project, UserProjectRole, ProjectDomain, ProjectSkillRequirement, ProjectRequirementSection, \
     ProjectTask, ProjectRole
+from users.models import User
 
 
 @login_required
@@ -270,20 +272,35 @@ def api_remove_project_tasks(request,name):
             return JsonResponse({'status': 'Unauthorized access', 'code': 403})
     except Exception as e:
         return JsonResponse({'status':'error','message':str(e),'code':405})
-@csrf_exempt
+
+
+@login_required
 @require_http_methods(["GET"])
-def api_get_project_roles(request,name):
+@ratelimit(key='user_or_ip', rate='10000/s', method='GET')
+def api_get_project_roles(request, name):
     try:
         project = Project.objects.get(name=name)
         role = UserProjectRole.objects.get_user_role_in_project(project, request.user)
+
         if UserProjectRole.objects.get_role_permissions(role, project)['can_change_project_settings']:
-            project_roles = ProjectRole.objects.get_project_roles(project).values()
-            return JsonResponse({'status':'succes','code':200,'roles':list(project_roles)})
+            project_roles = list(ProjectRole.objects.get_project_roles(project).values())
+            for role_dict in project_roles:
+                user_roles_entries = UserProjectRole.objects.filter(
+                    project=project,
+                    role_id=role_dict['id']
+                ).select_related('user')
+
+                role_dict['users'] = [entry.user.username for entry in user_roles_entries]
+
+            return JsonResponse({'status': 'success', 'roles': project_roles}, status=200)
         else:
-            return JsonResponse({'status': 'Unauthorized access', 'code': 403})
+            return JsonResponse({'status': 'Unauthorized access'}, status=403)
+
+    except Project.DoesNotExist:
+        return JsonResponse({'status': 'Project not found'}, status=404)
     except Exception as e:
-        print(str(e))
-        return JsonResponse({'status':'error','code':''})
+        print(f"Eroare in api_get_project_roles: {str(e)}")
+        return JsonResponse({'status': 'error'}, status=500)
 
 @login_required
 def filter_tree_by_path(request,tree, current_path):
@@ -393,10 +410,13 @@ def proxy_run_code(request):
 @login_required
 def request_file_open(request):
     pass
+def verify_push_permissions(user,user_permissions,file_list):
+    #TODO BEFORE USER TRIES PUSHING FILES
+    pass
 @login_required
 @require_http_methods(["POST"])
 def push_files(request):
-    invalidate_repo_cache()
+    #invalidate_repo_cache()
     try:
         data = json.loads(request.body)
         files = data.get('files',{})
@@ -448,3 +468,90 @@ def push_files(request):
     except Exception as e:
         print(str(e))
         return JsonResponse({'error':str(e)},status=500)
+
+@login_required
+@require_http_methods(["POST"])
+@csrf_exempt
+def api_add_project_role(request, id):
+    try:
+        project = get_object_or_404(Project, id=id)
+        user_role = UserProjectRole.objects.get_user_role_in_project(project, request.user)
+        if UserProjectRole.objects.get_role_permissions(user_role, project)['can_change_project_settings']:
+            data = json.loads(request.body)
+            can_accept_invites = data.get('can_accept_invites', False),
+            can_invite_others = data.get('can_invite_others', False),
+            can_kick_others = data.get('can_kick_others', False),
+            can_change_roles = data.get('can_change_roles', False),
+            can_start_calls = data.get('can_start_calls', False),
+            can_add_tasks = data.get('can_add_tasks', False),
+            can_delete_tasks = data.get('can_delete_tasks', False),
+            can_modify_tasks = data.get('can_modify_tasks', False),
+            can_change_project_settings = data.get('can_change_project_settings', False)
+            if can_accept_invites and can_invite_others and can_kick_others and can_change_roles and can_start_calls and can_add_tasks and can_modify_tasks and can_delete_tasks and can_change_project_settings:
+                return JsonResponse({'error':'Cannot recreate the owner role'},status=403)
+            new_role = ProjectRole.objects.create(
+                project=project,
+                name=data.get('name'),
+                can_accept_invites=can_accept_invites,
+                can_invite_others=can_invite_others,
+                can_kick_others=can_kick_others,
+                can_change_roles=can_change_roles,
+                can_start_calls=can_start_calls,
+                can_add_tasks=can_add_tasks,
+                can_delete_tasks=can_delete_tasks,
+                can_modify_tasks=can_modify_tasks,
+                can_change_project_settings=can_change_project_settings
+            )
+            return JsonResponse({'status': 'success', 'role_id': new_role.id}, status=200)
+        else:
+            return JsonResponse({'status': 'Unauthorized access'}, status=403)
+
+    except Exception as e:
+        print(f"Eroare in api_add_project_role: {str(e)}")
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+@csrf_exempt
+def api_assign_users_to_role(request, id):
+    try:
+        project = get_object_or_404(Project,id=id)
+        user_role = UserProjectRole.objects.get_user_role_in_project(project, request.user)
+
+        # Verificăm permisiunile de admin
+        if UserProjectRole.objects.get_role_permissions(user_role, project)['can_change_project_settings']:
+            data = json.loads(request.body)
+            role_id = data.get('role_id')
+            usernames = data.get('usernames', [])  # Așteaptă o listă: ["radu", "ana"]
+
+            # Luăm obiectul noului rol
+            target_role = get_object_or_404(ProjectRole, id=role_id, project=project)
+
+            assigned_users = []
+
+            for username in usernames:
+                try:
+                    target_user = User.objects.get(username=username)
+
+                    # 1. Căutăm dacă userul are DEJA un rol în acest proiect
+                    existing_roles = UserProjectRole.objects.filter(project=project, user=target_user)
+                    if existing_roles.exists():
+                        # 2. Dacă are, ștergem legăturile vechi
+                        existing_roles.delete()
+
+                    # 3. Adăugăm noul rol
+                    UserProjectRole.objects.create(project=project, user=target_user, role=target_role)
+                    assigned_users.append(username)
+
+                except User.DoesNotExist:
+                    print(f"Userul {username} nu exista in baza de date, il sarim.")
+                    continue
+
+            return JsonResponse({'status': 'success', 'assigned': assigned_users}, status=200)
+        else:
+            return JsonResponse({'status': 'Unauthorized access'}, status=403)
+
+    except Exception as e:
+        print(f"Eroare in api_assign_users_to_role: {str(e)}")
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)

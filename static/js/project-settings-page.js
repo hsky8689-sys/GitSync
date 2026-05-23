@@ -473,27 +473,183 @@ function removeRequirementFromLocalStorage(index, rmfromadd) {
     renderPendingRequirements();
 }
 //project role
-async function loadRolesSection(){
-    await getProjectRoles();
-    var area = document.getElementsByClassName('project-related-posts').item(0);
-    area.innerHTML = ``;
-    var roles = ``;
+const PROJECT_PERMISSIONS = [
+    { key: 'can_accept_invites', label: 'Can accept invites' },
+    { key: 'can_invite_others', label: 'Can invite others' },
+    { key: 'can_kick_others', label: 'Can kick others' },
+    { key: 'can_change_roles', label: 'Can change roles' },
+    { key: 'can_start_calls', label: 'Can start calls' },
+    { key: 'can_add_tasks', label: 'Can add tasks' },
+    { key: 'can_delete_tasks', label: 'Can delete tasks' },
+    { key: 'can_modify_tasks', label: 'Can modify tasks' },
+    { key: 'can_change_project_settings', label: 'Can change project settings' }
+];
 
-    area.innerHTML = roles;
+async function loadRolesSection() {
+    var area = document.getElementsByClassName('project-related-posts').item(0);
+    area.innerHTML = '<p>Loading roles...</p>';
+
+    const rolesData = await getProjectRoles();
+
+    if (!rolesData) {
+        area.innerHTML = '<p>Eroare la încărcarea rolurilor.</p>';
+        return;
+    }
+
+    let html = `<h1>Administrare Roluri Proiect</h1><br>`;
+
+    if (rolesData.length === 0) {
+        html += `<p>Nu există niciun rol definit încă.</p>`;
+    } else {
+        html += `<div class="roles-list" style="display: grid; gap: 15px;">`;
+
+        rolesData.forEach(role => {
+            html += `
+            <div class="role-card" style="border: 1px solid #ccc; padding: 15px; border-radius: 8px;">
+                <h2 style="margin-top:0; color: #007bff;">Rol: ${role.name}</h2>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                        <strong>Permisiuni active:</strong>
+                        <ul style="list-style-type: none; padding-left: 0; margin-top: 5px;">`;
+
+            let hasAtLeastOnePermission = false;
+            PROJECT_PERMISSIONS.forEach(perm => {
+                if (role[perm.key]) {
+                    html += `<li>✅ ${perm.label}</li>`;
+                    hasAtLeastOnePermission = true;
+                }
+            });
+
+            if (!hasAtLeastOnePermission) {
+                html += `<li><em>Fără permisiuni speciale</em></li>`;
+            }
+
+            html += `   </ul>
+                    </div>
+                    <div>
+                        <strong>Oameni care au acest rol:</strong>
+                        <ul style="list-style-type: square; margin-top: 5px;">`;
+
+            if (role.users && role.users.length > 0) {
+                role.users.forEach(user => {
+                    html += `<li>👤 ${user}</li>`;
+                });
+            } else {
+                html += `<li><em>Niciun membru atribuit vizibil</em></li>`;
+            }
+
+            html += `   </ul>
+                        <div style="margin-top: 10px; border-top: 1px dashed #ccc; padding-top: 10px;">
+                            <input type="text" id="assign-user-${role.id}" placeholder="Username coleg..." style="width: 120px; padding: 4px;">
+                            <button onclick="assignUserToRole(${role.id})" style="background: #17a2b8; color: white; border: none; padding: 5px 10px; cursor: pointer;">Atribuie User</button>
+                        </div>
+                    </div>
+                </div>
+                <br>
+                <button onclick="deleteRole(${role.id})" style="background: #dc3545; color: white; border: none; padding: 5px 10px; cursor: pointer;">Șterge Rolul</button>
+            </div>`;
+        });
+
+        html += `</div>`;
+    }
+
+    html += `
+    <hr style="margin: 30px 0;">
+    <h2>Creează un rol nou</h2>
+    <form id="new-role-form" onsubmit="createNewRole(event)" style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+        <label for="new-role-name"><strong>Nume Rol:</strong></label><br>
+        <input type="text" id="new-role-name" required placeholder="ex: Senior Developer" style="width: 100%; max-width: 300px; margin-bottom: 15px;"><br>
+        
+        <strong>Selectează permisiunile pentru acest rol:</strong>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; margin-top: 10px; margin-bottom: 20px;">`;
+
+    PROJECT_PERMISSIONS.forEach(perm => {
+        html += `
+            <label style="cursor: pointer;">
+                <input type="checkbox" id="chk_${perm.key}" value="true">
+                ${perm.label}
+            </label>`;
+    });
+
+    html += `
+        </div>
+        <button type="submit" style="background: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer;">Salvare Rol Nou</button>
+    </form>`;
+
+    area.innerHTML = html;
 }
-async function getProjectRoles(){
-    try{
-        const desiredUrl = ``;
-        const response = await fetch(`/projects/settings/${window.djangoContext.project.name}/api-get-roles`,
-            {headers: {
-                    'X-CSRFToken': getCookie('csrftoken')
-                }});
-        if(response.ok){
+
+// 3. FETCH ROLURI GET
+async function getProjectRoles() {
+    try {
+        const response = await fetch(`/projects/settings/${window.djangoContext.project.name}/api-get-roles`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+
+        if (response.ok) {
             const data = await response.json();
-            alert(data.roles);
-            localStorage.setItem('roles',JSON.stringify(data.roles));
+            return data.roles;
+        } else {
+            console.error("Eroare la fetch:", response.status);
+            return null;
         }
-    }catch (error){
+    } catch (error) {
+        console.error("Eroare request:", error);
+        return null;
+    }
+}
+
+// 4. CREARE ROL NOU (POST)
+async function createNewRole(event) {
+    event.preventDefault();
+
+    const roleName = document.getElementById('new-role-name').value.trim();
+    let newRoleData = { name: roleName };
+
+    PROJECT_PERMISSIONS.forEach(perm => {
+        const checkbox = document.getElementById(`chk_${perm.key}`);
+        newRoleData[perm.key] = checkbox.checked;
+    });
+
+    try {
+        const response = await fetch(`/projects/settings/${window.djangoContext.project.id}/api-add-role`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify(newRoleData)
+        });
+
+        if (response.ok) {
+            await loadRolesSection(); // Reîncarcă afișarea după salvare
+        } else {
+            alert("Eroare la salvarea rolului!");
+        }
+    } catch (error) {
         alert(error);
+    }
+}
+
+// 5. ATRIBUIRE USER (NOU - De implementat în backend pe viitor)
+async function assignUserToRole(roleId) {
+    const usernameInput = document.getElementById(`assign-user-${roleId}`);
+    const username = usernameInput.value.trim();
+
+    if(!username) {
+        alert("Introdu un username mai întâi!");
+        return;
+    }
+
+    alert(`Aici va pleca requestul de atribuire a colegului "${username}" către rolul cu ID-ul ${roleId}. (Trebuie făcut View-ul pe backend)`);
+    // fetch(`/api-assign-user-to-role`, { method: 'POST', ... })
+    // usernameInput.value = '';
+}
+
+// 6. ȘTERGERE ROL (De implementat în backend pe viitor)
+async function deleteRole(roleId) {
+    if(confirm("Sigur vrei să ștergi acest rol?")) {
+        alert(`Aici pleacă requestul de DELETE pentru rolul ${roleId}.`);
     }
 }

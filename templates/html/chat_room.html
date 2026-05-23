@@ -9,11 +9,12 @@
 {% block extrajs %}
     <script src="{% static 'js/chat-page.js' %}" defer></script>
     <script>
-    window.djangoContext['chat_info']=
-        {
-            conversation_id: {{ chat_id }},
-            current_user_converstaion:{{ user_101 }}
-        }
+    window.djangoContext = window.djangoContext || {};
+    window.djangoContext['chat_info'] = {
+        conversation_id: {{ chat_id|default:"null" }},
+        current_user_converstaion: {{ user_101|default:"null" }},
+        current_user_id: {{ request.user.id }}
+    };
     </script>
 {% endblock %}
 {% block content %}

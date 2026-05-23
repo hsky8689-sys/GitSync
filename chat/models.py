@@ -12,9 +12,9 @@ class ConversationManager(models.Manager):
 
     def get_conversation_messages_paged(self, conversation_id, page_number=1,page_size=1000):
         offset = page_number * page_size
-        messages = Message.objects.filter(conversation_id=conversation_id).order_by('-timestamp')[offset: offset + page_size]
+        messages = Message.objects.filter(conversation_id=conversation_id).order_by('timestamp')[offset: offset + page_size]
         messages = list(messages)
-        # Transformarea în listă de obiecte evaluate (forțează interogarea în DB acum)
+
         return messages
 
 class MessagesManager(models.Manager):

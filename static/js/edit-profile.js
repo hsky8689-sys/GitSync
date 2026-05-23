@@ -12,7 +12,7 @@ function getCookie(name){
             }
             return cookieValue;
         }
- async function goToProjectCreation(){
+async function goToProjectCreation(){
            try{
         const response = await fetch('/users/create-new-project/', {
             headers: {'X-Requested-With': 'XMLHttpRequest'}
@@ -25,7 +25,7 @@ function getCookie(name){
         window.location.href = '/users/create-new-project/';
     }
     }
-    async function switchAccount(){
+async function switchAccount(){
            try{
         const response = await fetch("/login/", {
             headers: {'X-Requested-With': 'XMLHttpRequest'}
@@ -38,7 +38,7 @@ function getCookie(name){
         window.location.href = '/login/';
     }
     }
-    async function goToInbox(user){
+async function goToInbox(user){
         try{
             const response = await fetch('/users/search/', {
             headers: {'X-Requested-With': 'XMLHttpRequest'}
@@ -47,7 +47,7 @@ function getCookie(name){
             alert(err);
         }
     }
-    async function goToSearch(){
+async function goToSearch(){
            try{
         const response = await fetch('/users/search/', {
             headers: {'X-Requested-With': 'XMLHttpRequest'}
@@ -60,7 +60,7 @@ function getCookie(name){
         window.location.href = '/users/search/';
     }
     }
-        async function addSkill(categoryId){
+async function addSkill(categoryId){
         const input = document.querySelector(`input[data-category-id="${categoryId}"]`);
         const name = input.value.trim();
 
@@ -91,7 +91,7 @@ function getCookie(name){
             alert('Error: '+error)
         }
         }
-        async function deleteSkill(skillId) {
+async function deleteSkill(skillId) {
             if (confirm('Ștergi skill-ul?')) {
                 await fetch(`/api/delete-skill/${skillId}/`, {
                 method: 'DELETE',
@@ -159,4 +159,7 @@ async function goToConnections(){
 }
 function start1on1Chat(targetUserId) {
     window.location.href = `/chat/?user_1o1=${targetUserId}`;
+}
+function goToConversations() {
+    window.location.href = `/chat/`;
 }
