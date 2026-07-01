@@ -2,9 +2,8 @@ from collections import defaultdict
 from datetime import datetime
 
 import django.db
-from django.db import models,transaction
+from django.db import models, transaction
 from django.db.models import QuerySet
-from django.template.defaultfilters import title
 
 from users.models import User
 
@@ -28,7 +27,9 @@ class ProjectManager(models.Manager):
         with transaction.atomic():
             proj = self.create(owner_id=user, name=name, description=description)
             default_roles = ProjectRole.objects.create_default_project_roles(proj)
-            UserProjectRole.objects.give_role(proj.owner, proj, default_roles[0][0].id)
+            if not UserProjectRole.objects.give_role(proj.owner, proj, default_roles[0][0].id):
+                transaction.set_rollback(True)
+                return None
         return proj
 
     def delete_project(self, project):
@@ -39,10 +40,10 @@ class ProjectManager(models.Manager):
         """
         try:
             deleted_count,_=Project.objects.get(id=project.id).delete()
-            return deleted_count
+            return deleted_count > 0
         except django.db.DatabaseError as e:
             print(str(e))
-            return 0
+            return False
 
     def get_user_projects(self, user):
         """
@@ -50,7 +51,7 @@ class ProjectManager(models.Manager):
         :param project:
         :return:
         """
-        return self.filter(id__in=UserProjectRole.objects.filter(user_id=user.id)).values_list('id',flat=True)
+        return self.filter(id__in=UserProjectRole.objects.filter(user_id=user.id).values_list('project_id', flat=True))
 
 
 class Project(models.Model):
@@ -78,7 +79,7 @@ class ProjectDomainManager(models.Manager):
             return succes
         except django.db.DatabaseError as e:
             print(str(e))
-            return None
+            return []
 
     def remove_domains_from_project(self, project, domain_names):
         """
@@ -197,17 +198,19 @@ class UserRoleValidator():
 class ProjectRoleManager(models.Manager):
     def create_default_project_roles(self, project):
         try:
-            from devnetwork.settings import DEFAULT_PROJECT_ROLES
-            created_roles = []
-            for role_name, role_permissions in DEFAULT_PROJECT_ROLES.items():
-                role = ProjectRole.objects.get_or_create(
-                    name=role_name,
-                    defaults=role_permissions
-                )
-                created_roles.append(role)
-            return created_roles
+            with transaction.atomic():
+                from devnetwork.settings import DEFAULT_PROJECT_ROLES
+                created_roles = []
+                for role_name, role_permissions in DEFAULT_PROJECT_ROLES.items():
+                    role = ProjectRole.objects.get_or_create(
+                        name=role_name,
+                        defaults=role_permissions
+                    )
+                    created_roles.append(role)
+                return created_roles
         except django.db.Error as e:
             print(str(e))
+            return []
 
     def modify_project_role(self, project, form):
         try:
@@ -253,9 +256,14 @@ class UserProjectRoleManager(models.Manager):
         """
 
     def give_role(self, user, project, role):
-        role = self.model(user_id=user.id, project_id=project.id, role_id=role)
-        role.save()
-
+        try:
+            with transaction.atomic():
+                role = self.model(user_id=user.id, project_id=project.id, role_id=role)
+                role.save()
+                return True
+        except django.db.Error as e:
+            print(str(e))
+            return False
     def get_user_role_in_project(self, project, user):
         """
         Gets an user's role in a project if it exists,else labels them as visitors
@@ -298,7 +306,7 @@ class UserProjectRoleManager(models.Manager):
                 'can_execute_code', 'can_share_file_access', 'can_change_project_settings'
             ]}
 
-    def give_role_to_user(self, project: int, role_assigner: int, user: int, role):
+    def give_role_to_user(self, project: int, user: int, role):
         """
 
         :param project:
@@ -308,15 +316,14 @@ class UserProjectRoleManager(models.Manager):
         :return:
         """
         try:
-            if not UserRoleValidator.is_operation_permitted(project, role_assigner, user, role):
-                return False
-            role = self.get(project_id=project, user_id=user)
-            if role is None:
-                return self.create(project_id=project, user_id=user, role=role)
-            role.update(role=role)
-        except ValueError:
-            return False
-        except django.db.DatabaseError as e:
+            with transaction.atomic():
+                old_role = self.filter(project_id=project, user_id=user)
+                if not old_role.exists():
+                    return self.create(project_id=project, user_id=user, role=role) is not None
+                old_role.update(role=role)
+                return True
+        except (django.db.DatabaseError,ValueError) as e:
+            print(str(e))
             return False
 
     def get_all_users_in_project(self, project):
@@ -370,18 +377,21 @@ class UserProjectRole(models.Model):
 class ProjectTaskParticipationManager(models.Manager):
     def add_task_participations(self, task, users):
         try:
-            participations = [ProjectTaskParticipation(user=user, task=task) for user in users]
-            self.bulk_create(participations)
-        except django.db.DatabaseError:
-            return
+            with transaction.atomic():
+                participations = [ProjectTaskParticipation(user=user, task=task) for user in users]
+                return self.bulk_create(participations)
+        except (django.db.DatabaseError,ValueError) as e:
+            print(str(e))
+            return []
 
     def remove_task_participations(self, task, users):
         try:
-            participations = [self.filter(task=task, user=user) for user in users]
-            for p in participations:
-                p.delete()
+            with transaction.atomic():
+                participations = self.filter(task=task, user__in=users)
+                participations.delete()
+                return True
         except django.db.DatabaseError:
-            return
+            return False
 
 
 class ProjectTaskParticipation(models.Model):
@@ -402,13 +412,13 @@ class ProjectRequiementSectionManager(models.Manager):
         :return:
         """
         try:
-            new_sections = [ProjectRequirementSection(project=project, name=skill_name) for skill_name in names]
-            created = self.bulk_create(new_sections, batch_size=100)
-            if len(created) != len(names):
-                raise ValueError("All sections couldn't be added")
-            return created
+            with transaction.atomic():
+                new_sections = [ProjectRequirementSection(project=project, name=skill_name) for skill_name in names]
+                created = self.bulk_create(new_sections, batch_size=100)
+                return created
         except django.db.DatabaseError as e:
             print(str(e))
+            return []
 
     def remove_requirement_sections(self, project, names):
         """
@@ -418,10 +428,9 @@ class ProjectRequiementSectionManager(models.Manager):
         :return:
         """
         try:
-            with transaction.atomic():
-                former_sections = self.filter(project=project, name__in=names).select_for_update()
-                deleted_count,_=former_sections.delete()
-                return deleted_count
+            former_sections = self.filter(project=project, name__in=names)
+            deleted_count,_=former_sections.delete()
+            return deleted_count
         except django.db.DatabaseError as e:
             print(str(e))
             return 0
@@ -436,10 +445,10 @@ class ProjectRequiementSectionManager(models.Manager):
         """
         try:
             with transaction.atomic():
-                former_sections = self.select_for_update().filter(project=project, name__in=old_names).distinct()
+                former_sections = self.filter(project=project, name__in=old_names).select_for_update().distinct()
                 for index in range(len(former_sections)):
-                    former_sections[index].title = new_names[index]
-                return former_sections.bulk_update(former_sections,['title'],1000)
+                    former_sections[index].name = new_names[index]
+                return former_sections.bulk_update(former_sections,['name'],1000)
         except django.db.DatabaseError as e:
             print(str(e))
             return 0
@@ -458,13 +467,13 @@ class ProjectRequirementSection(models.Model):
 class ProjectSkillRequirementManager(models.Manager):
     def add_skill_requirements(self, section, names):
         try:
-            new_requirements = [ProjectSkillRequirement(section=section, name=skill_name) for skill_name in names]
-            created = self.bulk_create(new_requirements, batch_size=100)
-            if len(created) != len(names):
-                raise ValueError("All sections couldn't be added")
-            return created
+            with transaction.atomic():
+                new_requirements = [ProjectSkillRequirement(section=section, name=skill_name) for skill_name in names]
+                created = self.bulk_create(new_requirements, batch_size=100)
+                return created
         except django.db.DatabaseError as e:
             print(str(e))
+            return []
 
     def remove_skill_requirements(self, section, names):
         """
@@ -474,11 +483,12 @@ class ProjectSkillRequirementManager(models.Manager):
         :return:
         """
         try:
-            reqs = self.filter(section=section, name__in=names).select_for_update()
-            former_requirements = reqs.delete()
-            return former_requirements
+            reqs = self.filter(section=section, name__in=names)
+            former_requirements,_ = reqs.delete()
+            return former_requirements > 0
         except django.db.DatabaseError as e:
             print(str(e))
+            return False
 
     def get_requirements_grouped_by_sections(self, project):
         """
@@ -538,26 +548,42 @@ class TaskResourceAccessManager(models.Manager):
 
     def remove_resources_from_task(self, task, resource_paths):
         try:
-            return self.filter(task=task, resource_path__in=resource_paths).delete()
+            deleted_count,_= self.filter(task=task, resource_path__in=resource_paths).delete()
+            return deleted_count > 0
         except django.db.DatabaseError as e:
             print(str(e))
+            return False
+
+    def get_user_accessible_paths(self, user, project):
+        """
+        Resolves every resource_path (trailing '/' stripped) the user can
+        touch in this project, in ONE query pair instead of one pair per
+        file being checked.
+        """
+        task_ids = ProjectTaskParticipation.objects.filter(
+            user=user, task__project=project
+        ).values_list('task_id', flat=True)
+        if not task_ids:
+            return []
+        return [
+            path.rstrip('/')
+            for path in self.filter(task_id__in=task_ids).values_list('resource_path', flat=True)
+        ]
+
+    @staticmethod
+    def path_is_covered(file_path, accessible_paths):
+        for resource_path in accessible_paths:
+            if file_path == resource_path or file_path.startswith(resource_path + '/'):
+                return True
+        return False
 
     def user_has_access_to_path(self, user, project, file_path):
         """
         ReBAC check: a user can touch a path if they participate in a task
         that the path (or one of its parent folders) was affiliated with.
         """
-        task_ids = ProjectTaskParticipation.objects.filter(
-            user=user, task__project=project
-        ).values_list('task_id', flat=True)
-        if not task_ids:
-            return False
-        resources = self.filter(task_id__in=task_ids)
-        for resource in resources:
-            resource_path = resource.resource_path.rstrip('/')
-            if file_path == resource_path or file_path.startswith(resource_path + '/'):
-                return True
-        return False
+        accessible_paths = self.get_user_accessible_paths(user, project)
+        return self.path_is_covered(file_path, accessible_paths)
 
 
 class TaskResourceAccess(models.Model):
